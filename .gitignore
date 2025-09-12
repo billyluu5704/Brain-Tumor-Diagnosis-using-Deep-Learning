@@ -30,7 +30,6 @@ outputs/
 *.h5
 *.keras
 *.pt
-*.pth
 *.ckpt
 *.onnx
 
