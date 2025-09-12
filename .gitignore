@@ -1,0 +1,58 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*.ipynb_checkpoints/
+
+# -------------------------
+# Environments
+# -------------------------
+.env
+.venv/
+venv/
+my_env/
+
+# -------------------------
+# Logs, outputs, models
+# -------------------------
+logs/
+checkpoints/
+runs/
+outputs/
+
+# -------------------------
+# Data / generated files
+# -------------------------
+*.npy
+*.npz
+*.csv
+*.h5
+*.keras
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# -------------------------
+# Medical imaging (very large)
+# -------------------------
+*.nii
+*.nii.gz
+*.mha
+*.nrrd
+*.dcm
+
+
+# -------------------------
+# System / IDE
+# -------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# -------------------------
+# Git backups
+# -------------------------
+.git_backup_*/
