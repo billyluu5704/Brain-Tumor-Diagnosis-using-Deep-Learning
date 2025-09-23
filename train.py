@@ -1,5 +1,6 @@
 import os
 import shutil
+from tabnanny import verbose
 import tempfile
 import time
 import matplotlib.pyplot as plt
@@ -24,16 +25,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #-------------Config---------------
 NUM_EPOCHS = 200
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 3e-4
 BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/Task01_BrainTumour"
 BASE_DIR_WIN = r"D:/medical image lab/monai/data/Task01_BrainTumour"
 #MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D_add_learnable_weight.pth"
+MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_learnable_weight.pth"
 #MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
 
 # Reasonable NCCL / CUDA defaults for debugging
 os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-os.environ.setdefault("MASTER_PORT", "29600")
+os.environ.setdefault("MASTER_PORT", "29601")
 os.environ.setdefault("NCCL_BLOCKING_WAIT", "1")
 os.environ.setdefault("NCCL_ASYNC_ERROR_HANDLING", "1")
 os.environ.setdefault("NCCL_DEBUG", "INFO")
@@ -114,12 +115,28 @@ def init_head_bias_to_prior(model, p=(0.03, 0.02, 0.01)):  # per-class priors
 #multi-label (3-channel) loss: Dice(sigmoid) + BCE-with-logits
 dice_loss = DiceLoss(sigmoid=True, reduction="mean", smooth_nr=0, smooth_dr=1e-5, squared_pred=True)
 BCE_WEIGHT = 0.7 
+POS_WEIGHT = torch.tensor([50.0, 50.0, 50.0])
+
+def focal_tversky_loss(logits, target, alpha=0.7, beta=0.3, gamma=0.75, eps=1e-6):
+    p = torch.sigmoid(logits)
+    dims = [0,2,3,4]
+    tp = (p * target).sum(dims)
+    fp = (p * (1 - target)).sum(dims)
+    fn = ((1 - p) * target).sum(dims)
+    t = (tp + eps) / (tp + alpha * fp + beta * fn + eps)
+    return (1 - t).pow(gamma).mean()
 
 def multilabel_loss(logits, target):
+    # Ensure all aux tensors are on the SAME device/dtype as logits
+    pos_weight = POS_WEIGHT.to(device=logits.device, dtype=logits.dtype).view(1, -1, 1, 1, 1)
+
     # logits: [B, 3, ...], target: [B, 3, ...] in {0,1}
-    bce = F.binary_cross_entropy_with_logits(logits, target.float())
-    dsc = dice_loss(logits, target)
-    return BCE_WEIGHT * bce + (1.0 - dsc)
+    bce = F.binary_cross_entropy_with_logits(
+        logits, target.float(),
+        pos_weight=pos_weight #broadcast to spatial dims
+    )
+    ftv = focal_tversky_loss(logits, target)
+    return BCE_WEIGHT * bce + (1.0 - BCE_WEIGHT) * ftv
 
 def main_worker(local_rank=None):
     set_determinism(seed=42)
@@ -139,22 +156,22 @@ def main_worker(local_rank=None):
     use_checkpointing = True
     #model = model_builder.UNet3D(in_channels=4, out_channels=3).to(device)
     model = U_Mamba_net(in_channels=4, num_classes=3, use_checkpointing=use_checkpointing).to(device)
-    init_head_bias_to_prior(model, p=(0.03, 0.02, 0.01))  # set bias for final layer
+    init_head_bias_to_prior(model, p=(0.15, 0.10, 0.05))  # set bias for final layer
     
     if world_size > 1:
         model = torch.nn.parallel.DistributedDataParallel(
             model, 
             device_ids=[local_rank],
             output_device=local_rank,
-            find_unused_parameters=True
+            find_unused_parameters=False
         )
 
     #Optimizer/loss/scheduler
     #loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
     loss = multilabel_loss
     opt = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4) #optimizer
-    #scheduler = ReduceLROnPlateau(opt, mode='max', factor=0.1, patience=5) #learning rate scheduler
-    scheduler = CosineAnnealingLR(opt, T_max=max(1, len(train_loader)) * NUM_EPOCHS, eta_min=1e-6)
+    scheduler = ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=4, min_lr=1e-6) #learning rate scheduler
+    #scheduler = CosineAnnealingLR(opt, T_max=max(1, len(train_loader)) * NUM_EPOCHS, eta_min=1e-6)
 
     # Load model if it exists
     load_checkpoint_if_any(model, opt, device, rank)

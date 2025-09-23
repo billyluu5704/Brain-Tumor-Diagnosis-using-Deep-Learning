@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 import time
 
-
 class U_Mamba_block(nn.Module):
     def __init__(self, d_model: int, d_state: int, expand_factor: int = 2, d_conv: int = 4):
         super(U_Mamba_block, self).__init__()
@@ -41,45 +40,44 @@ class U_Mamba_block(nn.Module):
         nn.init.xavier_uniform_(self.out_proj.weight)
 
     def ssm(self, x):
-        # x has shape [B, L, d_inner]
-        b, l, d_inner = x.shape
-        #print(f"SSM input shape: {x.shape}")
+        # make sure AMP is enabled here even during checkpoint recompute
+        device_type = "cuda" if x.is_cuda else "cpu"
+        with torch.amp.autocast(
+            device_type=device_type,
+            dtype=torch.get_autocast_gpu_dtype() if device_type == "cuda" else torch.bfloat16,
+            enabled=True,
+        ):
+            # x: [B, L, d_inner]
+            b, l, d_inner = x.shape
 
-        # Discretize A
-        A = -F.softplus(self.A_log).unsqueeze(0).expand(self.d_inner, -1).to(x.dtype) # [d_inner, d_state]
-        
-        # Project x to get delta, B, and C
-        delta = F.softplus(self.delta_proj(x)).to(x.dtype).clamp(min=1e-4, max=10) # [B, L, d_inner]
-        B = self.B_proj(x) # [B, L, d_state]
-        C = self.C_proj(x) # [B, L, d_state]
+            # Discretize A
+            A = -F.softplus(self.A_log).unsqueeze(0).expand(self.d_inner, -1).to(x.dtype)  # [d_inner, d_state]
 
-        #a more optimized implementation would use a parallel scan
-        y_out = []
-        h = x.new_zeros(b, self.d_inner, self.d_state)  # [B, d_inner, d_state]
+            # Project x to get delta, B, C
+            delta = F.softplus(self.delta_proj(x)).to(x.dtype).clamp(1e-4, 10)  # [B, L, d_inner]
+            B = self.B_proj(x)  # [B, L, d_state]
+            C = self.C_proj(x)  # [B, L, d_state]
 
-        for i in range(l):
-            # Get parameters for this timestep
-            delta_t = delta[:, i, :] # [B, d_inner]
-            B_t = B[:, i, :]       # [B, d_state]
-            C_t = C[:, i, :]       # [B, d_state]
-            x_t = x[:, i, :]         # [B, d_inner]
+            # Preallocate to reduce fragmentation
+            y_out = x.new_empty((b, l, self.d_inner), dtype=x.dtype)         # [B, L, d_inner]
+            h = x.new_zeros((b, self.d_inner, self.d_state), dtype=x.dtype)   # [B, d_inner, d_state]
 
-            # Discretize A for this timestep
-            A_bar = torch.exp(delta_t.unsqueeze(-1) * A) # [B, d_inner, d_state]
-            
-            # Discretize B and apply input x
-            delta_B_x = (delta_t * x_t).unsqueeze(-1) * B_t.unsqueeze(1)  
-            
-            # State update
-            h = A_bar * h + delta_B_x
-            if self.training:
-                h = F.dropout(h, p=0.05, training=True)
-            
-            # Output for this timestep
-            y_t = (h * C_t.unsqueeze(1)).sum(dim=-1)  # [B, d_inner]
-            y_out.append(y_t)
+            for i in range(l):
+                delta_t = delta[:, i, :]     # [B, d_inner]
+                B_t = B[:, i, :]            # [B, d_state]
+                C_t = C[:, i, :]            # [B, d_state]
+                x_t = x[:, i, :]            # [B, d_inner]
 
-        y_out = torch.stack(y_out, dim=1) # [B, L, d_inner]
+                # Compute exp in float32 for numeric stability, then cast back
+                prod32 = (delta_t.unsqueeze(-1) * A).to(torch.float32)
+                A_bar = torch.exp(prod32).to(x.dtype)        # [B, d_inner, d_state]
+
+                delta_B_x = (delta_t * x_t).unsqueeze(-1) * B_t.unsqueeze(1)
+                h = A_bar * h + delta_B_x
+                if self.training:
+                    h = F.dropout(h, p=0.02, training=True)
+
+                y_out[:, i, :] = (h * C_t.unsqueeze(1)).sum(dim=-1)
         return y_out
     
     def forward(self, x):

@@ -43,7 +43,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 set_determinism(seed=0)
 
 BATCH_SIZE = 2
-NUM_WORKERS = 1
+NUM_WORKERS = 2
 BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/Task01_BrainTumour"
 
 class MakeUnionLabel(MapTransform):
@@ -94,7 +94,7 @@ def preprocess_data(world_size=None, rank=None):
                 keys=["image", "label"],
                 label_key="label_union",
                 spatial_size=TRAIN_ROI,
-                pos=4,           # ratio of positive samples
+                pos=12,           # ratio of positive samples
                 neg=1,           # ratio of negative samples
                 num_samples=2,   # you can increase to 2–4 for more diversity
                 image_key="image",
@@ -108,7 +108,7 @@ def preprocess_data(world_size=None, rank=None):
             RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
             RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
             #ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=(240, 240, 144)),
-            ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=(128, 128, 64)),
+            ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=TRAIN_ROI),
             EnsureTyped(keys=["image", "label"])
         ]
     )

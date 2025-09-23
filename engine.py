@@ -9,6 +9,8 @@ from torchmetrics import Dice
 from monai.metrics import DiceMetric
 from monai.transforms import AsDiscrete, Activations, Compose
 from monai.data import DataLoader, decollate_batch
+import torch.nn.functional as F
+from monai.inferers import sliding_window_inference
 
 # use amp to accelerate training
 scaler = torch.amp.GradScaler('cuda')
@@ -17,79 +19,180 @@ torch.backends.cudnn.benchmark = True
 
 # multi-label eval; we have 3 foreground channels, no explicit background
 epoch_dice_metric = DiceMetric(include_background=False, reduction="mean", ignore_empty=True)
-post_trans = Compose([Activations(sigmoid=True)])
+post_trans = Compose([
+    Activations(sigmoid=True),
+    AsDiscrete(threshold=0.5),
+])
 
 #MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
 #MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D_add_learnable_weight.pth"
+MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_learnable_weight.pth"
 
-def train_step(model: torch.nn.Module, dataloader: torch.utils.data.DataLoader, loss_fn: torch.nn.Module, optimizer: torch.optim.Optimizer, device: torch.device) -> Tuple[float, float]:
-    model.train() #put model in training mode
-    train_loss= 0.0 #initialize loss and dice score to 0
+def train_step(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    loss_fn: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device
+) -> float:
+    model.train()
+    train_loss = 0.0
     step = 0
     batch_bar = tqdm(dataloader, desc="Training", leave=False, unit="batch")
+    AUX_W2, AUX_W3 = 0.3, 0.2 #weights for deep supervision head
 
     for batch, data in enumerate(batch_bar):
-        X, y = data["image"], data["label"]  # Get batch
-        
-        # If they are still strings, raise an error
+        X, y = data["image"], data["label"]
+
+        # Guard against path strings
         if isinstance(X, str) or isinstance(y, str):
             raise TypeError(f"DataLoader is returning file paths instead of tensors: X={X}, y={y}")
+
         X, y = X.to(device), y.to(device)
-        with torch.no_grad():
-            pos_ratio = y.float().mean().item()
-            print(f"[dbg][train] batch pos-ratio = {pos_ratio:.6f}")
+
+        # Quick overall foreground ratio (all classes combined)
+        if (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0) and batch < 3:
+            with torch.no_grad():
+                pos_ratio = y.float().mean().item()
+                print(f"[dbg][train] batch pos-ratio = {pos_ratio:.6f}")
+
         optimizer.zero_grad(set_to_none=True)
-        with autocast(device_type='cuda'):
-            y_pred = model(X)
-            loss = loss_fn(y_pred, y)
+
+        # Forward + loss under AMP
+        with autocast(device_type="cuda"):
+            out = model(X)
             
-        train_loss += loss.item()
+            if isinstance(out, tuple):
+                # Expect (main, aux2, aux3)
+                main_log, aux2_log, aux3_log = out
+
+                # If aux logits are at different scales, upsample to main size
+                main_size = main_log.shape[2:]
+                if aux2_log.shape[2:] != main_size:
+                    aux2_log = F.interpolate(aux2_log, size=main_size, mode="trilinear", align_corners=False)
+                if aux3_log.shape[2:] != main_size:
+                    aux3_log = F.interpolate(aux3_log, size=main_size, mode="trilinear", align_corners=False)
+
+                loss_main = loss_fn(main_log, y)
+                loss_aux2 = loss_fn(aux2_log, y)
+                loss_aux3 = loss_fn(aux3_log, y)
+                loss = loss_main + AUX_W2 * loss_aux2 + AUX_W3 * loss_aux3
+
+                y_pred = main_log  # use main head for debug stats
+            else:
+                y_pred = out
+                loss = loss_fn(y_pred, y)
+
+        # Per-class ratios/probs (first few batches on rank 0)
+        if (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0) and batch < 3:
+            with torch.no_grad():
+                pr = y.float().mean(dim=[0, 2, 3, 4])                 # per-class label prevalence
+                mp = torch.sigmoid(y_pred).mean(dim=[0, 2, 3, 4])     # per-class mean prob
+                print(f"[dbg][train] label pos-ratio per class = {pr.tolist()}, "
+                      f"mean prob per class = {mp.tolist()}")
+
+        # Backward + step with GradScaler and gradient clipping
         scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)  # unscale before clipping when using GradScaler
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
-        batch_bar.set_postfix(Loss=loss.item())
-        step += 1
 
-    train_loss /= step
+        train_loss += loss.item()
+        step += 1
+        batch_bar.set_postfix(Loss=f"{loss.item():.4f}")
+
+    train_loss /= max(step, 1)
     return train_loss
 
+def predict_full(model, X, roi=(128, 128, 64), overlap=0.5):
+    def _forward(inp):
+        with autocast(device_type="cuda", enabled=True):
+            out = model(inp)
+            if isinstance(out, tuple):
+                out = out[0]  # main head only
+            return out
+    preds = []
+    for dims in [(), (2,), (3,), (4,), (2,3), (2,4), (3,4), (2,3,4)]:
+        xa = torch.flip(X, dims=list(dims)) if dims else X
+        log = sliding_window_inference(
+            xa, roi, sw_batch_size=1, predictor=_forward, overlap=overlap, mode="gaussian"
+        )
+        prb = torch.sigmoid(log)
+        prb = torch.flip(prb, dims=list(dims)) if dims else prb
+        preds.append(prb)
+    return torch.stack(preds, 0).mean(0)  # [B, C, H, W, D]
 
-def test_step(model: torch.nn.Module, dataloader: torch.utils.data.DataLoader, loss_fn: torch.nn.Module, device: torch.device) -> Tuple[float, float]:
-    model.eval() #put model in evaluation mode
+
+def test_step(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    loss_fn: torch.nn.Module,
+    device: torch.device
+) -> float:
+    model.eval()
     epoch_dice_metric.reset()
-    step = 0
+
+    # Inference settings
+    USE_SLIDING_TTA = True              # set False to use a single forward pass
+    ROI = (128, 128, 64)                # match your TRAIN_ROI (or a larger eval ROI)
+    OVERLAP = 0.5
+    binarize = AsDiscrete(threshold=0.5)
 
     with torch.inference_mode():
-        step += 1
         batch_bar = tqdm(dataloader, desc="Evaluating", leave=False, unit="batch")
         for batch, data in enumerate(batch_bar):
-            #X for image, y for label
-            X, y = data["image"], data["label"]  # Get batch
-            # If they are still strings, raise an error
+            X, y = data["image"], data["label"]
             if isinstance(X, str) or isinstance(y, str):
                 raise TypeError(f"DataLoader is returning file paths instead of tensors: X={X}, y={y}")
-        
-            X, y = X.to(device), y.to(device)
-            test_pred_logits = model(X)
-            with torch.no_grad():
-                probs = torch.sigmoid(test_pred_logits)
-                print(f"[dbg][val] mean prob={probs.mean().item():.6f}, label pos-ratio={y.float().mean().item():.6f}")
-            val_outputs = [post_trans(i) for i in decollate_batch(test_pred_logits)]  # sigmoid->0/1
-            val_labels = [i for i in decollate_batch(y)]
-            
-            #accumulate into epoch metric
-            epoch_dice_metric(y_pred=val_outputs, y=val_labels)               # accumulate
 
-            #per batch display using TEMP metric
+            X, y = X.to(device), y.to(device)
+
+            # ---- Get probabilities (B, C, H, W, D) ----
+            if USE_SLIDING_TTA:
+                probs = predict_full(model, X, roi=ROI, overlap=OVERLAP)
+            else:
+                # fast path: single forward on the batch
+                out = model(X)
+                if isinstance(out, tuple):
+                    out = out[0]
+                probs = torch.sigmoid(out)
+
+            # ---- Debug prints (rank 0, first few batches) ----
+            if (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0) and batch < 3:
+                pr = y.float().mean(dim=[0, 2, 3, 4])   # per-class label prevalence
+                mp = probs.mean(dim=[0, 2, 3, 4])       # per-class mean prob
+                print(f"[dbg][val]   label pos-ratio per class = {pr.tolist()}, "
+                      f"mean prob per class = {mp.tolist()}")
+                print(f"[dbg][val] mean prob={probs.mean().item():.6f}, "
+                      f"label pos-ratio={y.float().mean().item():.6f}")
+
+            # ---- Threshold to binaries for Dice ----
+            val_outputs = [binarize(p) for p in decollate_batch(probs)]  # already probs → just binarize
+            val_labels  = [i for i in decollate_batch(y)]
+
+            # Per-class Dice (debug)
+            pc = DiceMetric(include_background=False, reduction="none", ignore_empty=True)
+            pc(y_pred=val_outputs, y=val_labels)
+            per_cls = [float(x) for x in pc.aggregate().cpu().flatten()]
+            pc.reset()
+            if (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0) and batch < 3:
+                print("[dbg][val] per-class Dice:", per_cls)
+
+            # Accumulate epoch Dice (mean over classes)
+            epoch_dice_metric(y_pred=val_outputs, y=val_labels)
+
+            # Per-batch Dice for the progress bar
             _batch_metric = DiceMetric(include_background=False, reduction="mean", ignore_empty=True)
             _batch_metric(y_pred=val_outputs, y=val_labels)
             batch_dice = _batch_metric.aggregate().item()
+            _batch_metric.reset()
             batch_bar.set_postfix(Dice=f"{batch_dice:.4f}")
 
-    test_dice = epoch_dice_metric.aggregate().item() #get batch dice score
+    test_dice = epoch_dice_metric.aggregate().item()
     epoch_dice_metric.reset()
     return test_dice
+
 
 def train(gpu, model: torch.nn.Module, train_dataloader: torch.utils.data.DataLoader,
         test_dataloader: torch.utils.data.DataLoader, optimizer: torch.optim.Optimizer,
@@ -98,6 +201,7 @@ def train(gpu, model: torch.nn.Module, train_dataloader: torch.utils.data.DataLo
         results = {'train_loss': [], 'test_dice': []}
         train_loss_graph = []
         test_dice_graph = []
+        best = -1.0
 
         for epoch in tqdm(range(epochs)):
             # Clear unused GPU memory before each epoch
@@ -113,7 +217,7 @@ def train(gpu, model: torch.nn.Module, train_dataloader: torch.utils.data.DataLo
 
             #call scheduler with test_dice
             if scheduler is not None:
-                scheduler.step()
+                scheduler.step(test_dice)
             
             print(
                 f"Epoch: {epoch+1}/{epochs}: | "
@@ -128,8 +232,10 @@ def train(gpu, model: torch.nn.Module, train_dataloader: torch.utils.data.DataLo
 
             # Save the model from GPU 0 only
             if gpu == 0:
-                utils.save_model(model=model, optimizer=optimizer, target_dir="model", model_name=MODEL_PATH)
-                print(f"[INFO] Model saved to: {MODEL_PATH}")
+                if test_dice > best:
+                    best = test_dice
+                    utils.save_model(model=model, optimizer=optimizer, target_dir="model", model_name=MODEL_PATH)
+                    print(f"[INFO] Model saved to: {MODEL_PATH}")
         return results, train_loss_graph, test_dice_graph
 
 def graphing_stats(train_loss_graph: list, test_dice_graph: list):

@@ -31,6 +31,9 @@ from monai.transforms import (
 )
 from monai.data import DataLoader, CacheDataset
 import numpy as np
+import torch.nn.functional as F
+from pathlib import Path
+
 
 if 'MASTER_ADDR' not in os.environ:
     os.environ['MASTER_ADDR'] = '127.0.0.1'
@@ -59,7 +62,7 @@ set_determinism(seed=0)
 NUM_WORKERS = 1
 #MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
 #MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D_add_learnable_weight.pth"
+MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_learnable_weight.pth"
 BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/test_data/"
 #BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/Task01_BrainTumour/imagesVal"
 torch.cuda.empty_cache()
@@ -75,7 +78,7 @@ def preprocess_val():
         Orientationd(keys="image", axcodes="RAS"),
         Spacingd(keys="image", pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-        ResizeWithPadOrCropd(keys="image", spatial_size=(240, 240, 144)), #also try (128, 128, 64)
+        ResizeWithPadOrCropd(keys="image", spatial_size=(128, 128, 64)), #also try (128, 128, 64)
         RepeatChannelsd(keys=["image"], target_channels=4),
         EnsureTyped(keys=["image"]),
     ])

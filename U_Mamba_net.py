@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from U_Mamba_blocks import Full_U_Mamba_Block, Residual_Block, Strided_Conv, Transposed_Conv
 
 class U_Mamba_net(nn.Module):
-    def __init__(self, in_channels=1, base_channels=8, ssm_dim=16, num_classes=1, use_checkpointing=False): #num_classes is out_channels
+    def __init__(self, in_channels=1, base_channels=16, ssm_dim=8, num_classes=1, use_checkpointing=False): #num_classes is out_channels
         super(U_Mamba_net, self).__init__()
 
         mamba_block_args = {"ssm_dim": ssm_dim, "use_checkpointing": use_checkpointing}
@@ -34,10 +34,12 @@ class U_Mamba_net(nn.Module):
         self.dec3_up = Transposed_Conv(base_channels * 4, base_channels * 2)
         self.dec3_mamba = Full_U_Mamba_Block(base_channels * 2, **mamba_block_args)
         self.dec3_res = Residual_Block(base_channels * 2)
+        self.aux3_head = nn.Conv3d(base_channels * 2, num_classes, kernel_size=1, bias=True)
 
         self.dec2_up = Transposed_Conv(base_channels * 2, base_channels)
         self.dec2_mamba = Full_U_Mamba_Block(base_channels, **mamba_block_args)
         self.dec2_res = Residual_Block(base_channels)
+        self.aux2_head = nn.Conv3d(base_channels, num_classes, kernel_size=1, bias=True)
 
         self.dec1_up = Transposed_Conv(base_channels, base_channels)
         self.dec1_mamba = Full_U_Mamba_Block(base_channels, **mamba_block_args)
@@ -70,11 +72,13 @@ class U_Mamba_net(nn.Module):
         x = self.dec3_up(x)
         x = self.dec3_mamba(x + x2)
         x = self.dec3_res(x)
+        aux3 = self.aux3_head(x)  # Deep supervision output 1
         #print(x.shape) #uplayer 3
 
         x = self.dec2_up(x)
         x = self.dec2_mamba(x + x1)
         x = self.dec2_res(x)
+        aux2 = self.aux2_head(x)  # Deep supervision output 2
         #print(x.shape) #uplayer 2
 
         x = self.dec1_up(x)
@@ -82,7 +86,13 @@ class U_Mamba_net(nn.Module):
         x = self.dec1_res(x)
         #print(x.shape) #uplayer 1
 
-        return self.final(x)
+        final = self.final(x)
+
+        main_size = final.shape[2:]  # (H, W, D)
+        aux2 = F.interpolate(aux2, size=main_size, mode='trilinear', align_corners=False)
+        aux3 = F.interpolate(aux3, size=main_size, mode='trilinear', align_corners=False)
+
+        return final, aux2, aux3
 
 """ if __name__ == "__main__":
     # Dummy input: batch size 1, 1 input channel, 64x64x64 volume
