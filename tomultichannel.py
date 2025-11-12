@@ -5,12 +5,11 @@ class ConvertToMultiChannel(MapTransform):
     def __call__(self, data):
         d = dict(data)
         for key in self.keys:
-            result = []
-            #merge label 2 and 3 to construct TC
-            result.append(torch.logical_or(d[key] == 2, d[key] == 3))
-            #merge label 1,2,3 to construct WT
-            result.append(torch.logical_or(torch.logical_or(d[key] == 1, d[key] == 2), d[key] == 3))
-            #label 2 is ET
-            result.append(d[key] == 2)
-            d[key] = torch.stack(result, axis=0).float()
+            lbl = d[key]
+            wt = (lbl == 1) | (lbl == 2) | (lbl == 3)   # whole tumor
+            tc = (lbl == 2) | (lbl == 3)                # tumor core
+            et = (lbl == 3)                             # enhancing tumor
+            d[key] = torch.stack(
+                [wt, tc, et], dim=0
+            ).float()
         return d

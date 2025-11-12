@@ -62,7 +62,7 @@ set_determinism(seed=0)
 NUM_WORKERS = 1
 #MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
 #MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_learnable_weight.pth"
+MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version2.pth"
 BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/test_data/"
 #BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/Task01_BrainTumour/imagesVal"
 torch.cuda.empty_cache()
@@ -78,7 +78,7 @@ def preprocess_val():
         Orientationd(keys="image", axcodes="RAS"),
         Spacingd(keys="image", pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-        ResizeWithPadOrCropd(keys="image", spatial_size=(128, 128, 64)), #also try (128, 128, 64)
+        ResizeWithPadOrCropd(keys="image", spatial_size=(128, 128, 64)), #spatial size must match training ROI size
         RepeatChannelsd(keys=["image"], target_channels=4),
         EnsureTyped(keys=["image"]),
     ])
@@ -133,9 +133,10 @@ def predict(image_name):
         print(f"Val output shape: {val_output.shape}")
         val_output_cpu = val_output.cpu() #move to cpu
         predicted_data = np.array(val_output_cpu, dtype=np.float32)
-
+        print("Predicted shape: ", predicted_data.shape)
         # Resize the output to the required dimensions (240, 240, 155)
         input_shape = val_input.shape[2:] #exclude batch & channel in val_input
+        predicted_data = predicted_data.squeeze(0)
         print(f"Input shape for resizing: {input_shape}")
         #resize_transform = Resize(spatial_size=input_shape) 
         resize_transform = Resize(spatial_size=(240, 240, 155))

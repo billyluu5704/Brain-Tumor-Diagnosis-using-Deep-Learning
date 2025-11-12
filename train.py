@@ -24,12 +24,12 @@ from U_Mamba_net import U_Mamba_net
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #-------------Config---------------
-NUM_EPOCHS = 200
+NUM_EPOCHS = 400
 LEARNING_RATE = 3e-4
 BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/Task01_BrainTumour"
 BASE_DIR_WIN = r"D:/medical image lab/monai/data/Task01_BrainTumour"
 #MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_learnable_weight.pth"
+MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version2.pth"
 #MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
 
 # Reasonable NCCL / CUDA defaults for debugging
@@ -155,7 +155,7 @@ def main_worker(local_rank=None):
     #build model and wrap with DDP
     use_checkpointing = True
     #model = model_builder.UNet3D(in_channels=4, out_channels=3).to(device)
-    model = U_Mamba_net(in_channels=4, num_classes=3, use_checkpointing=use_checkpointing).to(device)
+    model = U_Mamba_net(in_channels=4, num_classes=4, use_checkpointing=use_checkpointing).to(device)
     init_head_bias_to_prior(model, p=(0.15, 0.10, 0.05))  # set bias for final layer
     
     if world_size > 1:
@@ -168,7 +168,8 @@ def main_worker(local_rank=None):
 
     #Optimizer/loss/scheduler
     #loss = DiceLoss(smooth_nr=0, smooth_dr=1e-5, squared_pred=True, to_onehot_y=False, sigmoid=True)
-    loss = multilabel_loss
+    #loss = multilabel_loss
+    loss = DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)
     opt = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4) #optimizer
     scheduler = ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=4, min_lr=1e-6) #learning rate scheduler
     #scheduler = CosineAnnealingLR(opt, T_max=max(1, len(train_loader)) * NUM_EPOCHS, eta_min=1e-6)
