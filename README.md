@@ -52,13 +52,13 @@ python U_Mamba_predict.py     --input <path_to_volume> --output outputs/
 <table>
   <tr>
     <td><b>Ground Truth (Case 112)</b><br>
-      <img src="assets/figs/ground_truth_112.png" width="260" alt="Ground truth mask, case 112">
+      <img src="assets/figs/ground_truth_112.png" width="260" alt="Ground truth 112">
     </td>
     <td><b>U-Net Pred (Case 112)</b><br>
-      <img src="assets/figs/UNet_prediction_112.png" width="260" alt="U-Net prediction, case 112">
+      <img src="assets/figs/UNet_prediction_112.png" width="260" alt="UNet 112">
     </td>
     <td><b>U-MambaNet Pred (Case 112)</b><br>
-      <img src="assets/figs/u_mamba_prediction_112.png" width="260" alt="U-MambaNet prediction, case 112">
+      <img src="assets/figs/u_mamba_prediction_112.png" width="260" alt="UMamba 112">
     </td>
   </tr>
 </table>
@@ -66,7 +66,6 @@ python U_Mamba_predict.py     --input <path_to_volume> --output outputs/
 
 <video width="720" controls>
   <source src="assets/media/demo_video_mid_project.mp4" type="video/mp4">
-  Your browser does not support the video tag.
 </video>
 
 
