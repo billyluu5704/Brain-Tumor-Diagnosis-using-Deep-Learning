@@ -49,9 +49,26 @@ python train.py --model unet         # or --model u_mamba
 python U_Net_predict.py       --input <path_to_volume> --output outputs/
 python U_Mamba_predict.py     --input <path_to_volume> --output outputs/
 
-<table> <tr> <td><b>Case 001 — Input</b><br><img src="assets/figs/case001_input.png" width="260"></td> <td><b>Ground Truth</b><br><img src="assets/figs/case001_gt.png" width="260"></td> <td><b>U-Net Pred</b><br><img src="assets/figs/case001_unet.png" width="260"></td> <td><b>U-MambaNet Pred</b><br><img src="assets/figs/case001_umamba.png" width="260"></td> </tr> </table>
+<table>
+  <tr>
+    <td><b>Ground Truth (Case 112)</b><br>
+      <img src="assets/figs/ground_truth_112.png" width="260" alt="Ground truth mask, case 112">
+    </td>
+    <td><b>U-Net Pred (Case 112)</b><br>
+      <img src="assets/figs/UNet_prediction_112.png" width="260" alt="U-Net prediction, case 112">
+    </td>
+    <td><b>U-MambaNet Pred (Case 112)</b><br>
+      <img src="assets/figs/u_mamba_prediction_112.png" width="260" alt="U-MambaNet prediction, case 112">
+    </td>
+  </tr>
+</table>
 
---> <!-- <video width="720" controls> <source src="assets/media/demo.mp4" type="video/mp4"> Your browser does not support the video tag. </video> -->
+
+<video width="720" controls>
+  <source src="assets/media/demo_video_mid_project.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 
 Dang Luu, "Brain Tumor Detector — U-Net vs U-MambaNet," 2025.
 
