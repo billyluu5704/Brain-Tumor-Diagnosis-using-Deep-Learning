@@ -48,6 +48,7 @@ python train.py --model unet         # or --model u_mamba
 # 3) run inference
 python U_Net_predict.py       --input <path_to_volume> --output outputs/
 python U_Mamba_predict.py     --input <path_to_volume> --output outputs/
+```
 
 <table>
   <tr>
