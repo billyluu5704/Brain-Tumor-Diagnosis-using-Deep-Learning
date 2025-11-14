@@ -67,9 +67,11 @@ python U_Mamba_predict.py     --input <path_to_volume> --output outputs/
 </table>
 
 
-<video width="720" controls>
-  <source src="assets/media/demo_video_mid_project.mp4" type="video/mp4">
+## 🎬 Demo
+<video controls width="720">
+  <source src="https://raw.githubusercontent.com/billyluu5704/Brain-Tumor-Diagnosis-using-Deep-Learning/main/assets/media/demo_video_mid_project.mp4" type="video/mp4">
 </video>
+
 
 
 Dang Luu, "Brain Tumor Detector — U-Net vs U-MambaNet," 2025.
