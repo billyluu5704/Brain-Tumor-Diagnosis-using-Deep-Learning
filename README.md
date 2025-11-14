@@ -68,9 +68,10 @@ python U_Mamba_predict.py     --input <path_to_volume> --output outputs/
 
 
 ## 🎬 Demo
-<video controls width="720">
-  <source src="https://raw.githubusercontent.com/billyluu5704/Brain-Tumor-Diagnosis-using-Deep-Learning/main/assets/media/demo_video_mid_project.mp4" type="video/mp4">
-</video>
+<a href="https://youtu.be/nlro7IVzyuA">
+  <img src="https://img.youtube.com/vi/nlro7IVzyuA/maxresdefault.jpg" width="720" alt="Brain Tumor Detector demo">
+</a>
+
 
 
 
