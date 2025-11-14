@@ -15,7 +15,8 @@ Includes training, inference, and a gallery of overlays (ground truth vs. predic
 - **Stack:** PyTorch + MONAI, AMP (mixed precision), sliding-window training/inference.
 - **Report:** Bearcat AI Grant mid-project update (Nov 2025).
 
-<details><summary>Repo map</summary>
+## Repo map
+```bash
 Repo map (key files)
 ├─ train.py               # main training entry
 ├─ engine.py              # training/eval loop utils
@@ -30,6 +31,7 @@ Repo map (key files)
 └─ assets/
    ├─ figs/               # overlays & screenshots
    └─ media/              # demo .gif/.mp4 (tracked with Git LFS)
+```
 
 
 
