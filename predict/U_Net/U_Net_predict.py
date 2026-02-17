@@ -31,9 +31,6 @@ from monai.transforms import (
 )
 from monai.data import DataLoader, CacheDataset
 import numpy as np
-import torch.nn.functional as F
-from pathlib import Path
-
 
 if 'MASTER_ADDR' not in os.environ:
     os.environ['MASTER_ADDR'] = '127.0.0.1'
@@ -42,27 +39,27 @@ if 'MASTER_PORT' not in os.environ:
 
 import torch
 import time
-from model_builder import UNet3D
-from tomultichannel import ConvertToMultiChannel
-from preprocess import preprocess_data, show_image
+from architecture.U_Net.model_builder import UNet3D
+from preprocess.utils.tomultichannel import ConvertToMultiChannel
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from glob import glob
 import nibabel as nib
-from RepeatChannel import RepeatChannelsd
+from preprocess.utils.RepeatChannel import RepeatChannelsd
 #from monai.data import NiftiSaver
 import numpy as np
-from U_Mamba_net import U_Mamba_net
 from monai.transforms import AsDiscrete, Activations, Compose, Resize
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 set_determinism(seed=0)
 
-NUM_WORKERS = 1
-#MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
-#MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version2.pth"
+NUM_EPOCHS = 10
+BATCH_SIZE = 2
+LEARNING_RATE = 1e-4
+NUM_WORKERS = 2
+MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
+#MODEL_PATH = r"model/UNet3D.pth"
 BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/test_data/"
 #BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/Task01_BrainTumour/imagesVal"
 torch.cuda.empty_cache()
@@ -71,17 +68,23 @@ def preprocess_val():
     #val_images = sorted(glob(os.path.join(BASE_DIR_LINUX, "imagesVal", "*.nii.gz")))
     val_images = sorted(glob(os.path.join(BASE_DIR_LINUX, "*.nii.gz")))
     val_data = [{"image": img} for img in val_images]
-    val_transform = Compose([
-        LoadImaged(keys=["image"]),
-        EnsureChannelFirstd(keys="image"),
-        EnsureTyped(keys=["image"]),
-        Orientationd(keys="image", axcodes="RAS"),
-        Spacingd(keys="image", pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
-        NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-        ResizeWithPadOrCropd(keys="image", spatial_size=(128, 128, 64)), #spatial size must match training ROI size
-        RepeatChannelsd(keys=["image"], target_channels=4),
-        EnsureTyped(keys=["image"]),
-    ])
+    val_transform = Compose(
+        [
+            LoadImaged(keys=["image"]),
+            EnsureChannelFirstd(keys="image"),
+            EnsureTyped(keys=["image"]),
+            Orientationd(keys=["image"], axcodes="RAS"),
+            Spacingd(
+                keys=["image"],
+                pixdim=(1.0, 1.0, 1.0),
+                mode=("bilinear"),
+            ),
+            NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+            ResizeWithPadOrCropd(keys=["image"], spatial_size=(240, 240, 155)),
+            RepeatChannelsd(keys=["image"], target_channels=4),
+            EnsureTyped(keys=["image"])
+        ]
+    )
     val_ds = CacheDataset(
         data=val_data,
         transform=val_transform,
@@ -91,8 +94,7 @@ def preprocess_val():
     return val_ds
 
 def predict(image_name):
-    #model = UNet3D(in_channels=4, out_channels=3).to(device)
-    model = U_Mamba_net(in_channels=4, num_classes=3).to(device)
+    model = UNet3D(in_channels=4, out_channels=3).to(device)
     checkpoint = torch.load(MODEL_PATH, map_location=device)
     state_dict = checkpoint["model_state_dict"]
 
@@ -133,14 +135,12 @@ def predict(image_name):
         print(f"Val output shape: {val_output.shape}")
         val_output_cpu = val_output.cpu() #move to cpu
         predicted_data = np.array(val_output_cpu, dtype=np.float32)
-        print("Predicted shape: ", predicted_data.shape)
+
         # Resize the output to the required dimensions (240, 240, 155)
         input_shape = val_input.shape[2:] #exclude batch & channel in val_input
-        predicted_data = predicted_data.squeeze(0)
-        print(f"Input shape for resizing: {input_shape}")
-        #resize_transform = Resize(spatial_size=input_shape) 
-        resize_transform = Resize(spatial_size=(240, 240, 155))
+        resize_transform = Resize(spatial_size=input_shape)
         resized_output = resize_transform(predicted_data)
+        #resized_output = resize_transform(val_output.unsqueeze(0)).squeeze(0)
         print(f"Resized output shape: {resized_output.shape}")
         segmentation_mask = resized_output[0]
         #resized_output_np = resized_output.numpy().astype(np.float32)

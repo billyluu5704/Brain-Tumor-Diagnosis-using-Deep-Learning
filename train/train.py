@@ -11,25 +11,25 @@ from tqdm import tqdm
 import random
 import torch
 import time
-import engine, model_builder, utils
-from tomultichannel import ConvertToMultiChannel
-from preprocess import preprocess_data, show_image
+import engine.engine as engine, architecture.U_Net.model_builder as model_builder, utils.utils as utils
+from preprocess.utils.tomultichannel import ConvertToMultiChannel
+from preprocess.preprocess import preprocess_data, show_image
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 from glob import glob
-from U_Mamba_net import U_Mamba_net
+from architecture.U_Mamba_Net.U_Mamba_net import U_Mamba_net
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #-------------Config---------------
-NUM_EPOCHS = 400
+NUM_EPOCHS = 200
 LEARNING_RATE = 3e-4
 BASE_DIR_LINUX = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/data/Task01_BrainTumour"
 BASE_DIR_WIN = r"D:/medical image lab/monai/data/Task01_BrainTumour"
 #MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version2.pth"
+MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version3.pth"
 #MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
 
 # Reasonable NCCL / CUDA defaults for debugging

@@ -16,9 +16,9 @@ from monai.transforms import (
 )
 
 # local imports
-from U_Mamba_net import U_Mamba_net
-from model_builder import UNet3D
-from RepeatChannel import RepeatChannelsd
+from architecture.U_Mamba_Net.U_Mamba_net import U_Mamba_net
+from architecture.U_Net.model_builder import UNet3D
+from preprocess.utils.RepeatChannel import RepeatChannelsd
 from monai.data import decollate_batch
 from monai.transforms import (
     Compose, Activationsd, AsDiscreted, Invertd, SaveImaged, Lambdad
@@ -56,8 +56,8 @@ def make_preprocess(roi: Tuple[int, int, int], target_channels: int):
         Orientationd(keys=["image"], axcodes="RAS"),
         Spacingd(keys=["image"], pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
         NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True),
-        ResizeWithPadOrCropd(keys=["image"], spatial_size=roi),
-        RepeatChannelsd(keys=["image"], target_channels=target_channels),
+        #ResizeWithPadOrCropd(keys=["image"], spatial_size=roi),
+        #RepeatChannelsd(keys=["image"], target_channels=target_channels),
         EnsureTyped(keys=["image"], track_meta=True),
     ])
 
@@ -100,7 +100,7 @@ def parse_args():
     p.add_argument("--overlap", type=float, default=0.3, help="Sliding window overlap [0-1]")
     p.add_argument("--channels", type=int, default=4, help="Model input channels")
     p.add_argument("--num-classes", type=int, default=3, help="Output channels/classes")
-    p.add_argument("--activation", choices=["sigmoid", "softmax"], default="sigmoid")
+    p.add_argument("--activation", choices=["sigmoid", "softmax"], default="softmax")
     p.add_argument("--multilabel", action="store_true", help="Treat outputs as independent classes")
     p.add_argument("--threshold", type=float, default=0.5, help="Sigmoid threshold for multilabel")
     p.add_argument("--amp", action="store_true", help="Enable mixed precision")
@@ -176,14 +176,14 @@ if __name__ == "__main__":
 
 """ 
 tO RUN:
-CUDA_VISIBLE_DEVICES=3 python test_predict.py \
-  --model u_mamba \
-  --weights /home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version2.pth \
-  --inputs /home/luudh/luudh/MyFile/medical_image_lab/monai/data/test_data/BraTS-SSA-00009-000-t1c.nii.gz \
-  --outdir ./predictions \
-  --roi 128 128 64 \
-  --activation softmax \
-  --channels 4 \
-  --num-classes 4
+CUDA_VISIBLE_DEVICES=1 python U_Mamba_predict.py \
+      --model u_mamba \
+        --weights /home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version3.pth \
+          --inputs /home/luudh/luudh/MyFile/medical_image_lab/monai/data/test_data/BRATS_287.nii.gz \
+            --outdir ./predictions \
+              --roi 128 128 64 \
+                --activation softmax \
+                  --channels 4 \
+                    --num-classes 4
 
  """

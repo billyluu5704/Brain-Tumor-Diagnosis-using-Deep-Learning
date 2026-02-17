@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from U_Mamba_blocks import Full_U_Mamba_Block, Residual_Block, Strided_Conv, Transposed_Conv
+from architecture.U_Mamba_Net.U_Mamba_blocks import Full_U_Mamba_Block, Residual_Block, Strided_Conv, Transposed_Conv
 
 class U_Mamba_net(nn.Module):
     def __init__(self, in_channels=1, base_channels=16, ssm_dim=8, num_classes=1, use_checkpointing=False): #num_classes is out_channels

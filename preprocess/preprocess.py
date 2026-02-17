@@ -34,8 +34,8 @@ import random
 from torch.utils.data.distributed import DistributedSampler
 import torch
 import time
-import engine, model_builder, utils
-from tomultichannel import ConvertToMultiChannel
+import engine.engine as engine, architecture.U_Net.model_builder as model_builder, utils.utils as utils
+from preprocess.utils.tomultichannel import ConvertToMultiChannel
 import torch.nn as nn
 import torch.nn.functional as F
 from glob import glob
@@ -60,8 +60,8 @@ class MakeUnionLabel(MapTransform):
         lab = d["label"]  # shape: [1, D, H, W] or [D, H, W]
         # ensure channel-first
         if lab.ndim == 3:
-            lab = lab[None, ...]  # [1, D, H, W]
-        union = (lab > 0).astype(lab.dtype)
+            lab = lab.unsqueeze(0)  # [1, D, H, W]
+        union = (lab > 0).to(lab.dtype)
         d[self.out_key] = union  # [1, D, H, W]
         d["label"] = lab          # keep label single-channel
         return d
@@ -69,7 +69,7 @@ class MakeUnionLabel(MapTransform):
 
 
 # keep a single spatial size constant across train/val (matches your train crop)
-TRAIN_ROI = (96, 96, 96)  #(128, 128, 64)   # used this in RandSpatialCropd
+TRAIN_ROI = (96, 96, 96)  # used this in RandSpatialCropd
 
 def preprocess_data(world_size=None, rank=None):
     train_images = sorted(glob(os.path.join(BASE_DIR_LINUX, "imagesTr", "*.nii.gz")))
@@ -109,7 +109,7 @@ def preprocess_data(world_size=None, rank=None):
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
         RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
         RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
-        ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=TRAIN_ROI),
+        #ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=TRAIN_ROI),
         EnsureTyped(keys=["image", "label"]),
     ])
 
@@ -124,7 +124,7 @@ def preprocess_data(world_size=None, rank=None):
             mode=("bilinear", "nearest"),
         ),
         NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-        ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=TRAIN_ROI),
+        #ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=TRAIN_ROI),
         EnsureTyped(keys=["image", "label"]),
     ])
 
@@ -149,19 +149,45 @@ def preprocess_data(world_size=None, rank=None):
 
     return train_loader, val_loader, val_ds
 
-def show_image(data):
-    val_data_example = data
-    print(f"image shape: {val_data_example['image'].shape}")
+import matplotlib.pyplot as plt
+
+def show_image(sample, z=60):
+    """
+    sample: dict with keys 'image' and 'label'
+      image shape: [4, D, H, W] or [B, 4, D, H, W]
+      label shape: [1, D, H, W] or [B, 1, D, H, W]
+    """
+    img = sample["image"]
+    lab = sample["label"]
+
+    # if batch, take first item
+    if img.ndim == 5:  # [B, 4, D, H, W]
+        img = img[0]
+    if lab.ndim == 5:  # [B, 1, D, H, W]
+        lab = lab[0]
+
+    # squeeze label channel: [1,D,H,W] -> [D,H,W]
+    if lab.ndim == 4 and lab.shape[0] == 1:
+        lab = lab[0]
+
+    print("image shape:", tuple(img.shape))  # [4,D,H,W]
+    print("label shape:", tuple(lab.shape))  # [D,H,W]
+
+    # clamp z to valid range
+    z = max(0, min(z, img.shape[-1] - 1))
+
+    # show 4 MRI channels
     plt.figure("image", (24, 6))
-    for i in range(4):
-        plt.subplot(1,4,i+1)
-        plt.title(f"image channel {i}")
-        plt.imshow(val_data_example["image"][i, :, :, 60].detach().cpu(), cmap="gray")
+    for c in range(4):
+        plt.subplot(1, 4, c + 1)
+        plt.title(f"image channel {c}")
+        plt.imshow(img[c, :, :, z].detach().cpu(), cmap="gray")
+        plt.axis("off")
     plt.show()
-    print(f"label shape: {val_data_example['label'].shape}")
-    plt.figure("label", (24, 6))
-    for i in range(3):
-        plt.subplot(1,3,i+1)
-        plt.title(f"label channel {i}")
-        plt.imshow(val_data_example["label"][i, :, :, 60].detach().cpu())
+
+    # show single-channel label (class IDs)
+    plt.figure("label", (6, 6))
+    plt.title("label (class IDs)")
+    plt.imshow(lab[:, :, z].detach().cpu())
+    plt.axis("off")
     plt.show()

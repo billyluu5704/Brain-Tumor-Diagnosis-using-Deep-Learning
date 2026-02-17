@@ -2,7 +2,7 @@
 import torch
 import os
 import matplotlib.pyplot as plt
-import utils
+import utils.utils as utils
 from tqdm.auto import tqdm
 from typing import Dict, List, Tuple
 from torch.amp import GradScaler, autocast
@@ -12,6 +12,8 @@ from monai.transforms import AsDiscrete, Activations, Compose
 from monai.data import DataLoader, decollate_batch
 import torch.nn.functional as F
 from monai.inferers import sliding_window_inference
+from train.train import MODEL_PATH
+from pathlib import Path
 
 # use amp to accelerate training
 scaler = torch.amp.GradScaler('cuda')
@@ -27,7 +29,7 @@ post_trans = Compose([
 
 #MODEL_PATH = r"model/Medical_Image_UNet3D.pth"
 #MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_16_3D.pth"
-MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version2.pth"
+#MODEL_PATH = r"/home/luudh/luudh/MyFile/medical_image_lab/monai/going_modular/model/Medical_Image_U_Mamba_Net_ssm_8_3D_add_AUX_W2_W3_pos_16_version3.pth"
 
 def train_step(
     model: torch.nn.Module,
@@ -193,7 +195,7 @@ def test_step(
     return test_dice
 
 # plot training stats function
-def graphing_stats(train_loss_graph: list, test_dice_graph: list):
+def graphing_stats(train_loss_graph: list, test_dice_graph: list, model_name: str):
     plt.figure("train", (12, 6))
     plt.subplot(1, 2, 1)
     plt.title("Epoch Average Loss")
@@ -208,7 +210,7 @@ def graphing_stats(train_loss_graph: list, test_dice_graph: list):
     plt.xlabel("epoch")
     plt.plot(x, y, color="green")
     os.makedirs("plots", exist_ok=True)
-    plt.savefig("plots/U_Mamba_ssm_8_add_AUX_W2_W3_pos_16_train_stat_record.png")
+    plt.savefig(f"plots/{model_name}_train_stat_record.png")
     plt.close()
 
 def train(
@@ -226,6 +228,9 @@ def train(
     results = {"train_loss": [], "test_dice": []}
     train_loss_graph = []
     test_dice_graph = []
+
+    #extract model name
+    model_name = Path(MODEL_PATH).stem
 
     # helper: am I rank 0?
     def is_main():
@@ -298,7 +303,7 @@ def train(
             )
             torch.save(results, "model/training_stats.pth")
             # make the plot with what we have
-            graphing_stats(train_loss_graph, test_dice_graph)
+            graphing_stats(train_loss_graph, test_dice_graph, model_name=model_name)
         # re-raise so you still see the interrupt
         raise
     except Exception as e:
@@ -313,7 +318,7 @@ def train(
             )
             torch.save(results, "model/training_stats.pth")
             try:
-                graphing_stats(train_loss_graph, test_dice_graph)
+                graphing_stats(train_loss_graph, test_dice_graph, model_name=model_name)
             except Exception:
                 pass
         raise
